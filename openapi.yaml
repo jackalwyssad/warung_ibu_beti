@@ -1,0 +1,238 @@
+openapi: 3.1.0
+info:
+  title: API Layanan Pengadaan & Purchase Order ? Warung Ibu Beti
+  version: 1.0.0
+  description: |
+    Spesifikasi OpenAPI Level 2 untuk sistem Pengadaan, Pembelian (PO), Penerimaan Barang,
+    dan Hutang Dagang Supplier Warung Ibu Beti.
+    Terintegrasi secara Asinkron menggunakan Outbox Pattern dan RabbitMQ Message Broker.
+servers:
+  - url: http://localhost:8090/api/v1
+    description: Server Lokal Laravel Sail (Port 8090)
+
+paths:
+  /health:
+    get:
+      summary: Health Check Layanan
+      description: Memeriksa koneksi database MySQL dan koneksi broker RabbitMQ.
+      responses:
+        '200':
+          description: Layanan sehat dan berfungsi normal.
+        '503':
+          description: Satu atau lebih subsistem mengalami gangguan.
+
+  /suppliers:
+    get:
+      summary: Daftar Supplier
+      description: Mengambil daftar pemasok sembako dengan paginasi dan filter pencarian.
+      parameters:
+        - name: q
+          in: query
+          description: Kata kunci nama atau kode supplier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Berhasil mengambil daftar supplier.
+    post:
+      summary: Tambah Supplier Baru
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kode_supplier, nama, kontak]
+              properties:
+                kode_supplier:
+                  type: string
+                  example: SUP-SBK-01
+                nama:
+                  type: string
+                  example: PT Sembako Nusantara
+                kontak:
+                  type: string
+                  example: "08123456789"
+                alamat:
+                  type: string
+                  example: Jl. Pasar Induk No. 5
+                limit_kredit:
+                  type: integer
+                  example: 15000000
+      responses:
+        '201':
+          description: Supplier berhasil didaftarkan.
+        '422':
+          description: Validasi data gagal.
+
+  /suppliers/{id}:
+    get:
+      summary: Detail Supplier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Detail data supplier dan sisa limit kredit.
+        '404':
+          description: Supplier tidak ditemukan.
+
+  /pesanan:
+    get:
+      summary: Daftar Purchase Order (PO)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, dikonfirmasi, diproses, selesai, dibatalkan]
+      responses:
+        '200':
+          description: Daftar pesanan pembelian.
+    post:
+      summary: Buat Purchase Order (PO) Baru (Status Draft)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplier_id, metode_bayar, tanggal_pesan, items]
+              properties:
+                supplier_id:
+                  type: integer
+                  example: 1
+                metode_bayar:
+                  type: string
+                  enum: [tempo, tunai]
+                  example: tempo
+                keterangan:
+                  type: string
+                  example: Kulakan beras dan minyak
+                tanggal_pesan:
+                  type: string
+                  format: date
+                  example: "2026-10-21"
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [sku, nama_barang, jumlah_pesan, harga_satuan]
+                    properties:
+                      sku:
+                        type: string
+                        example: BRS-5KG
+                      nama_barang:
+                        type: string
+                        example: Beras Premium 5kg
+                      jumlah_pesan:
+                        type: integer
+                        example: 50
+                      harga_satuan:
+                        type: integer
+                        example: 70000
+      responses:
+        '201':
+          description: Purchase order draft berhasil dibuat.
+
+  /pesanan/{id}/konfirmasi:
+    post:
+      summary: Konfirmasi Purchase Order
+      description: |
+        Memvalidasi limit kredit supplier (jika tempo), mengunci baris database secara ACID,
+        mengubah status pesanan menjadi dikonfirmasi, dan menerbitkan event ke tabel Outbox.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Pesanan berhasil dikonfirmasi.
+        '422':
+          description: Limit kredit supplier terlampaui (RFC 9457).
+
+  /pesanan/{id}/terima-barang:
+    post:
+      summary: Catat Penerimaan Barang Fisik
+      description: |
+        Mencatat kedatangan barang dari supplier, memperbarui akumulasi penerimaan,
+        menerbitkan catatan Hutang Dagang jika tempo, dan menulis event ke Outbox.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [penerima, items]
+              properties:
+                penerima:
+                  type: string
+                  example: Mang Udin
+                catatan:
+                  type: string
+                  example: Kondisi karung utuh
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [sku, jumlah_diterima]
+                    properties:
+                      sku:
+                        type: string
+                        example: BRS-5KG
+                      jumlah_diterima:
+                        type: integer
+                        example: 50
+      responses:
+        '201':
+          description: Penerimaan barang berhasil dicatat.
+
+  /hutang:
+    get:
+      summary: Daftar Hutang Dagang Supplier
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [belum_lunas, lunas]
+      responses:
+        '200':
+          description: Daftar faktur hutang dagang.
+
+  /hutang/{id}/bayar:
+    post:
+      summary: Bayar Cicilan Hutang Dagang
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jumlah_bayar]
+              properties:
+                jumlah_bayar:
+                  type: integer
+                  example: 2500000
+      responses:
+        '200':
+          description: Pembayaran berhasil diproses dan dicatat ke outbox.
+        '400':
+          description: Nominal pembayaran tidak valid atau melebihi sisa hutang.
