@@ -21,8 +21,12 @@ class BrokerPengadaan
     }
 
     /**
-     * Menyiapkan topologi RabbitMQ: Topic Exchange, Dead Letter Exchange (DLX),
-     * Antrean Logistik Gudang (gudang.masuk), dan Antrean Buku Hutang (keuangan.buku-hutang).
+     * Menyiapkan topologi RabbitMQ:
+     * 1. Topic Exchange Utama: warung.pengadaan.events
+     * 2. Antrean Logistik Gudang (gudang.masuk)
+     * 3. Antrean Buku Hutang (keuangan.buku-hutang)
+     * 4. Antrean Bot WhatsApp (wa.pesanan-antrean) -> Gaya Messaging Tugas 3
+     * 5. Fanout Dead Letter Exchange (DLX) & Queue DLQ
      */
     public static function siapkanTopologi(AMQPChannel $channel): void
     {
@@ -38,7 +42,7 @@ class BrokerPengadaan
         $channel->queue_declare($queueDlq, false, true, false, false);
         $channel->queue_bind($queueDlq, $exchangeDlx);
 
-        // 3. Antrean Gudang: Menerima konfirmasi pesanan baru & penerimaan barang fisik
+        // 3. Antrean Gudang: Menerima konfirmasi PO & penerimaan barang fisik
         $channel->queue_declare(
             'gudang.masuk',
             false,
@@ -63,5 +67,17 @@ class BrokerPengadaan
         );
         $channel->queue_bind('keuangan.buku-hutang', $exchangeUtama, 'pengadaan.po.dikonfirmasi');
         $channel->queue_bind('keuangan.buku-hutang', $exchangeUtama, 'pengadaan.hutang.*');
+
+        // 5. Antrean Bot WhatsApp (Gaya Messaging - Sesuai Tugas 3)
+        $channel->queue_declare(
+            'wa.pesanan-antrean',
+            false,
+            true,
+            false,
+            false,
+            false,
+            new AMQPTable(['x-dead-letter-exchange' => $exchangeDlx])
+        );
+        $channel->queue_bind('wa.pesanan-antrean', $exchangeUtama, 'wa.pesanan.*');
     }
 }

@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Events\BarangDiterimaSupplier;
 use App\Exceptions\PesananTidakValidException;
+use App\Models\Barang;
 use App\Models\HutangDagang;
 use App\Models\ItemPesananPembelian;
 use App\Models\OutboxKirim;
@@ -46,6 +47,19 @@ class TerimaBarangAction
 
                 $subtotalDiterima = $jumlahTerima * $itemPo->harga_satuan;
                 $totalNilaiDiterima += $subtotalDiterima;
+
+                // UPDATE STOK TOKO OTOMATIS (Hubungan hulu pengadaan ke hilir stok)
+                $barang = Barang::firstOrNew(['sku' => $itemPo->sku]);
+                if (!$barang->exists) {
+                    $barang->nama_barang = $itemPo->nama_barang;
+                    $barang->kategori = 'sembako';
+                    $barang->stok = 0;
+                    $barang->harga_beli = $itemPo->harga_satuan;
+                    $barang->harga_jual = (int) ($itemPo->harga_satuan * 1.15); // Margin 15%
+                    $barang->satuan = 'pcs';
+                }
+                $barang->stok += $jumlahTerima;
+                $barang->save();
 
                 $rincianBarang[] = [
                     'sku' => $itemPo->sku,
@@ -94,7 +108,6 @@ class TerimaBarangAction
                 $hutang->sisa_hutang = $hutang->jumlah_hutang - $hutang->jumlah_dibayar;
                 $hutang->save();
 
-                // Mutasi total hutang supplier
                 $supplier->total_hutang += $totalNilaiDiterima;
                 $supplier->save();
             }
@@ -112,7 +125,6 @@ class TerimaBarangAction
                 $penerimaan->tanggal_terima->toIso8601String()
             );
 
-            // Tulis ke outbox pattern
             OutboxKirim::create([
                 'event_id' => (string) Str::uuid(),
                 'event_type' => 'BarangDiterimaSupplier',
