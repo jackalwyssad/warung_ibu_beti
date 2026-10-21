@@ -1,10 +1,10 @@
-# Sistem Terintegrasi Warung Ibu Beti ? Tugas 3 & Proyek Integrasi Sistem
+# Sistem Terintegrasi Warung Ibu Beti
 
 **Mata Kuliah:** Integrasi Sistem dan Komputasi Awan (25IF1504)  
 **Institusi:** STMIK Bandung  
 **Kelompok:** Intel  
 
-### Anggota Kelompok:
+### ?? Anggota Kelompok:
 1. **Jacky Firmansah** (1224010)
 2. **Arya Kusuma Dinata** (1224005)
 3. **Mochamad Aldi Ardiansyah** (1224020)
@@ -12,150 +12,363 @@
 
 ---
 
-## ?? Ringkasan Arsitektur Sistem (Sesuai Lembar Kerja Tugas 3)
+## ?? 1. Latar Belakang & Ringkasan Proyek
 
-Sistem ini dibangun berdasarkan hasil analisis **Lembar Kerja Tugas 3: Memilih Gaya Integrasi**, yang mengintegrasikan 4 komponen utama Warung Ibu Beti ke dalam dua gaya integrasi yang berbeda sesuai karakteristik bisnisnya:
+Proyek ini dibangun sebagai implementasi nyata dari **Lembar Kerja Tugas 3: Memilih Gaya Integrasi** untuk studi kasus **Warung Ibu Beti** (bisnis kelontong & sembako modern). Sistem ini mengintegrasikan seluruh operasional warung mulai dari transaksi kasir belanja langsung di toko fisik, pemesanan online via Bot WhatsApp, pembayaran digital (QRIS & Tunai), hingga pengelolaan rantai pasok / kulakan barang dari supplier.
 
-1. **Pasangan 1: Sistem Kasir (POS) ? Sistem Stok/Inventori (Gaya: Shared Database)**
-   - **Karakteristik:** *Tight coupling*, *real-time synchronous*, intrusiveness sedang.
-   - **Justifikasi:** Kasir fisik dan persediaan toko beroperasi di tempat dan waktu yang sama di toko. Setiap transaksi tunai maupun QRIS di kasir langsung memotong stok di tabel `barang` secara atomik (*pessimistic row locking* `SELECT ... FOR UPDATE`), sehingga mencegah barang terjual ganda tanpa latensi antrean.
-
-2. **Pasangan 2: Bot Pemesanan WhatsApp ? Sistem Stok/Inventori (Gaya: Messaging via RabbitMQ)**
-   - **Karakteristik:** *Loose coupling*, *asynchronous*, *low intrusiveness*.
-   - **Justifikasi:** Kanal WhatsApp bersifat asinkron dan terpisah dari server fisik toko. Pesanan dari bot WhatsApp disimpan sebagai draft dan diterbitkan sebagai pesan event ke **Topic Exchange RabbitMQ** (`wa.pesanan.masuk`). Consumer asinkron (`wa:proses-pesanan`) mengambil antrean dan mereservasi stok di belakang layar. Hal ini memungkinkan penambahan kanal baru (misal Web Store) di masa depan tanpa membongkar sistem stok.
-
-3. **Komponen Pendukung: Sistem Pengadaan & Restock Supplier (Hilir ke Hulu)**
-   - Melengkapi siklus hidup inventori toko: saat barang diterima dari supplier melalui Purchase Order (PO), stok barang di tabel `barang` otomatis bertambah.
+Sesuai instruksi dan materi perkuliahan, proyek ini memadukan dua gaya integrasi utama:
+1. **Shared Database:** Diterapkan pada **Sistem Kasir (POS) ? Sistem Stok/Inventori**, karena beroperasi pada lokasi dan waktu yang sama di toko fisik serta membutuhkan pemotongan stok *real-time* dengan transaksi ACID atomik.
+2. **Messaging (Asynchronous via RabbitMQ):** Diterapkan pada **Bot Pemesanan WhatsApp ? Sistem Stok/Inventori**, karena kanal obrolan bersifat asinkron dan membutuhkan *loose coupling* agar penambahan kanal baru (misal aplikasi web) tidak mengubah sistem stok utama.
+3. **Remote Procedure Invocation (REST API Level 2):** Seluruh layanan mengekspos endpoint API terstandarisasi berbasis spesifikasi OpenAPI 3.1.0 dengan format galat **RFC 9457 Problem Details** (`application/problem+json`).
 
 ---
 
-## ??? 1. Diagram Arsitektur Integrasi Sistem
+## ??? 2. Diagram Arsitektur Sistem
+
+Arsitektur sistem memisahkan tanggung jawab transaksi belanja langsung, antrean pesan online, dan logistik pengadaan:
 
 ```mermaid
 flowchart TB
+    %% Kanal Pengguna
     subgraph Klien ["1. Kanal Pengguna & Kasir"]
         PelangganToko["?? Pelanggan Toko Fisik"]
         PelangganWA["?? Pelanggan Online WhatsApp"]
-        Kasir["?? Kasir Toko"]
-        SupplierPemasok["?? Pemasok / Supplier Sembako"]
+        Kasir["?? Petugas Kasir Toko"]
+        SupplierPemasok["?? Pemasok / Distributor Sembako"]
     end
 
+    %% Layanan Aplikasi Laravel (Port 8090)
     subgraph CoreService ["2. Layanan Inti Laravel API (Port 8090)"]
         direction TB
         APIPos["?? Modul Kasir POS"]
         APIWa["?? Modul Webhook Bot WhatsApp"]
         APIStok["?? Modul Inventori Sembako"]
-        APIPengadaan["?? Modul Pengadaan / PO"]
-        OutboxWorker["?? Outbox Publisher Worker"]
-        WAWorker["?? Worker Konsumen WhatsApp"]
+        APIPengadaan["?? Modul Pengadaan & Supplier"]
+        OutboxWorker["?? Outbox Publisher Worker<br/>(pengadaan:kirim-outbox)"]
+        WAWorker["?? Worker Konsumen WhatsApp<br/>(wa:proses-pesanan)"]
     end
 
+    %% Penyimpanan Shared Database (Port 3309)
     subgraph DataStore ["3. Shared Database MySQL (Port 3309)"]
         direction TB
-        TBarang[("??? barang (Stok Real-time)")]
-        TKasir[("??? transaksi_kasir & pembayaran")]
-        TWa[("??? pesanan_wa")]
-        TOutbox[("??? outbox_kirim")]
-        TPo[("??? pesanan_pembelian & supplier")]
+        TBarang[("??? barang<br/>(Stok Real-time Sembako)")]
+        TKasir[("??? transaksi_kasir & pembayaran<br/>(Tunai & QRIS)")]
+        TWa[("??? pesanan_wa & item_pesanan_wa")]
+        TOutbox[("??? outbox_kirim<br/>(Event Atomik ACID)")]
+        TPo[("??? supplier, pesanan_pembelian,<br/>penerimaan_barang, hutang_dagang")]
     end
 
+    %% Message Broker RabbitMQ (Port 5676 & 15676)
     subgraph Broker ["4. Message Broker RabbitMQ (Port 5676 & 15676)"]
         direction TB
-        TopicEx[["?? Topic Exchange: warung.pengadaan.events"]]
+        TopicEx[["?? Topic Exchange:<br/>warung.pengadaan.events"]]
         QWA[("?? Antrean: wa.pesanan-antrean")]
         QGudang[("?? Antrean: gudang.masuk")]
         QHutang[("?? Antrean: keuangan.buku-hutang")]
         ExDLX[["?? Fanout DLX: warung.pengadaan.dlx"]]
+        QDLQ[("?? Antrean DLQ: pengadaan.audit.dlq")]
     end
 
-    %% Relasi Kasir (Shared DB)
-    PelangganToko --> Kasir
-    Kasir -->|1. Input Belanja| APIPos
-    APIPos -->|Gaya: SHARED DATABASE (Pessimistic Lock & Decrement)| TBarang
-    APIPos -->|Simpan Transaksi & Bayar QRIS/Tunai| TKasir
+    %% Relasi Alur Kasir (Shared DB)
+    PelangganToko -->|Belanja Langsung| Kasir
+    Kasir -->|1. Input Transaksi| APIPos
+    APIPos -->|Gaya: SHARED DATABASE<br/>Pessimistic Row Lock & Decrement| TBarang
+    APIPos -->|Simpan Transaksi & Pembayaran| TKasir
 
-    %% Relasi Bot WA (Messaging)
-    PelangganWA -->|2. Order via WA| APIWa
-    APIWa -->|Simpan Draft| TWa
-    APIWa -->|Gaya: MESSAGING (Tulis Event Atomik)| TOutbox
-    TOutbox -.->|Polling Event Pending| OutboxWorker
+    %% Relasi Alur WhatsApp (Messaging)
+    PelangganWA -->|2. Kirim Chat Order| APIWa
+    APIWa -->|Simpan Draft Pesanan| TWa
+    APIWa -->|Gaya: MESSAGING<br/>Simpan Event ke Outbox| TOutbox
+    TOutbox -.->|Polling Pending Events| OutboxWorker
     OutboxWorker -->|Publish Event wa.pesanan.masuk| TopicEx
-    TopicEx -->|Binding wa.pesanan.*| QWA
-    QWA -->|Ambil Pesan Asinkron| WAWorker
-    WAWorker -->|Reservasi Stok & Ubah Status| TBarang
+    TopicEx -->|Binding: wa.pesanan.*| QWA
+    QWA -->|Konsumsi Pesan Asinkron| WAWorker
+    WAWorker -->|Reservasi Stok & Update Status| TBarang
 
-    %% Relasi Pengadaan Supplier
-    SupplierPemasok --> APIPengadaan
+    %% Relasi Alur Pengadaan
+    SupplierPemasok -->|3. Kirim Pasokan Sembako| APIPengadaan
     APIPengadaan --> TPo
-    APIPengadaan -->|Barang Masuk Tambah Stok| TBarang
+    APIPengadaan -->|Penerimaan Fisik Tambah Stok| TBarang
+    APIPengadaan -->|Event PO & Penerimaan| TOutbox
+
+    TopicEx -->|Binding: pengadaan.po.*<br/>pengadaan.barang.*| QGudang
+    TopicEx -->|Binding: pengadaan.po.dikonfirmasi<br/>pengadaan.hutang.*| QHutang
+    QWA -.->|Pesan Error/Nack| ExDLX
+    ExDLX --> QDLQ
 ```
 
 ---
 
-## ?? 2. Alokasi Port Terisolasi (Bebas Konflik)
+## ?? 3. Rincian Alur Kerja Sistem (Flows)
 
-| Layanan | Port Host | Keterangan |
-|---|---|---|
-| **Aplikasi Laravel API** | `8090` | Base URL: `http://localhost:8090/api/v1` |
-| **MySQL Database** | `3309` | Database: `warung_beti`, User: `sail`, Password: `password` |
-| **RabbitMQ AMQP** | `5676` | Host AMQP untuk koneksi worker & publisher |
-| **RabbitMQ Management Dashboard** | `15676` | URL: `http://localhost:15676` (User: `beti`, Pass: `rahasia123`) |
-| **Swagger UI** | `8083` | URL: `http://localhost:8083` |
-| **Vite Dev Server** | `5176` | Port frontend |
+Sistem mengimplementasikan tiga alur bisnis utama yang saling terhubung:
+
+### ?? Alur A: Transaksi Kasir POS (Gaya: Shared Database)
+Alur ini melayani pelanggan yang datang langsung berbelanja ke warung fisik:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Pelanggan as Pelanggan Toko
+    actor Kasir as Petugas Kasir
+    participant API as Modul Kasir API
+    participant DB as Shared Database (MySQL)
+
+    Pelanggan->>Kasir: Membawa barang belanjaan (misal: Beras & Minyak)
+    Kasir->>API: POST /api/v1/kasir/transaksi (SKU barang & Metode Bayar)
+    activate API
+    API->>DB: BEGIN TRANSACTION (ACID)
+    API->>DB: SELECT * FROM barang WHERE sku = '...' FOR UPDATE (Lock Row)
+    alt Stok Cukup
+        API->>DB: UPDATE barang SET stok = stok - qty (Potong Stok Instan)
+        API->>DB: INSERT INTO transaksi_kasir & item_transaksi_kasir
+        API->>DB: INSERT INTO pembayaran (Tunai / QRIS)
+        API->>DB: COMMIT TRANSACTION
+        API-->>Kasir: HTTP 201 Created (Struk & Status Lunas)
+        Kasir-->>Pelanggan: Serahkan barang & kembalian uang / bukti QRIS
+    else Stok Kurang
+        API->>DB: ROLLBACK TRANSACTION
+        API-->>Kasir: HTTP 422 Unprocessable Entity (RFC 9457: Stok Tidak Mencukupi)
+        Kasir-->>Pelanggan: Informasikan bahwa stok fisik habis
+    end
+    deactivate API
+```
+
+**Karakteristik & Trade-off (Sesuai Analisis Tugas 3):**
+- **Application Coupling:** *Tight coupling*. Kasir dan stok berada di toko fisik yang sama.
+- **Data Timeliness:** *Real-time*. Pemotongan stok terjadi detik itu juga tanpa menunggu antrean batch.
+- **Synchronous vs Asynchronous:** *Synchronous*. Kasir menunggu kepastian ketersediaan stok sebelum struk dicetak.
+- **Integrator Intrusiveness:** Sedang. Dirancang sebagai satu kesatuan sistem internal toko.
 
 ---
 
-## ?? 3. Panduan Menjalankan & Menguji Sistem
+### ?? Alur B: Pemesanan Online via Bot WhatsApp (Gaya: Messaging via RabbitMQ)
+Alur ini melayani pelanggan yang memesan sembako dari rumah via chat WhatsApp:
 
-### 1. Menjalankan Container Docker
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Pelanggan as Pelanggan Online
+    participant WA as Bot WhatsApp / Webhook
+    participant Outbox as Tabel outbox_kirim
+    participant Worker as Outbox Publisher Worker
+    participant RMQ as RabbitMQ (Topic Exchange)
+    participant Consumer as Worker Konsumen WA
+    participant DB as Shared Database (Stok)
+
+    Pelanggan->>WA: Kirim pesan pesanan: "Pesan Beras 5kg 1 karung"
+    WA->>Outbox: Simpan pesanan draft & Event PesananWhatsAppMasuk (ACID Outbox)
+    WA-->>Pelanggan: HTTP 202 Accepted ("Pesanan Anda sedang diantrekan...")
+    
+    Worker->>Outbox: Baca event berstatus pending
+    Worker->>RMQ: Publish pesan ke exchange 'warung.pengadaan.events' (Key: 'wa.pesanan.masuk')
+    Worker->>Outbox: Update status event -> 'terkirim'
+    
+    RMQ->>Consumer: Teruskan pesan ke antrean 'wa.pesanan-antrean'
+    activate Consumer
+    Consumer->>DB: Cek ketersediaan stok barang
+    alt Stok Tersedia
+        Consumer->>DB: Potong stok & ubah status pesanan -> 'diproses'
+        Consumer-->>Pelanggan: Kirim notifikasi WA: "Pesanan dikonfirmasi & disiapkan!"
+    else Stok Kosong
+        Consumer->>DB: Ubah status pesanan -> 'dibatalkan'
+        Consumer-->>Pelanggan: Kirim notifikasi WA: "Maaf, stok barang sedang habis."
+    end
+    Consumer->>RMQ: basic_ack (Selesai diproses)
+    deactivate Consumer
+```
+
+**Karakteristik & Trade-off (Sesuai Analisis Tugas 3):**
+- **Application Coupling:** *Loose coupling*. Provider API WhatsApp / Webhook dapat diganti kapan saja tanpa memengaruhi sistem stok.
+- **Data Timeliness:** *Near real-time*. Pesanan diantrekan secara asinkron.
+- **Synchronous vs Asynchronous:** *Asynchronous*. Pelanggan segera mendapat konfirmasi antrean, sementara reservasi stok berjalan di latar belakang.
+- **Integrator Intrusiveness:** Rendah. Integrasi cukup melalui webhook dan message broker.
+
+---
+
+### ?? Alur C: Logistik Pengadaan & Supplier (Rantai Pasok Hulu ke Hilir)
+Alur ini melengkapi ekosistem warung agar barang yang habis dapat di-restock dari supplier:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as Admin Warung
+    actor Supplier as Supplier / Pemasok
+    participant API as Modul Pengadaan API
+    participant DB as Database (PO & Hutang)
+    participant Stok as Tabel barang
+
+    Admin->>API: POST /api/v1/pesanan (Buat PO Kulakan Sembako)
+    API->>DB: Simpan status Draft
+    Admin->>API: POST /api/v1/pesanan/{id}/konfirmasi (Validasi Plafon Kredit Supplier)
+    alt Nilai PO <= Sisa Plafon Kredit
+        API->>DB: Ubah status PO -> 'dikonfirmasi' & tulis event outbox
+        Admin->>Supplier: Kirim Surat Purchase Order (PO)
+        Supplier->>Admin: Kirim pasokan fisik barang ke warung
+        Admin->>API: POST /api/v1/pesanan/{id}/terima-barang (Catat Kedatangan Fisik)
+        API->>Stok: Akumulasi penambahan stok barang di toko (Stok Bertambah)
+        API->>DB: Terbitkan Faktur Hutang Dagang Tempo (Invoice)
+    else Nilai PO Melebihi Plafon Kredit
+        API-->>Admin: HTTP 422 (KreditSupplierTerlampaui - RFC 9457)
+    end
+```
+
+---
+
+## ?? 4. Pemetaan Port Terisolasi (Bebas Konflik)
+
+Agar tidak terjadi bentrok dengan modul praktikum dosen (`toko-stok` & `layanan-pembukuan`) maupun proyek terdahulu, port pada proyek ini telah dialokasikan secara independen:
+
+| Layanan / Subsistem | Port Proyek Ini (`warung_ibu_beti`) | Port Modul Referensi Dosen | Keterangan |
+|---|---|---|---|
+| **Aplikasi Laravel API** | **`8090`** | `8000` / `8081` | Base URL: `http://localhost:8090/api/v1` |
+| **MySQL Database** | **`3309`** | `3306` / `3307` / `3308` | DB: `warung_beti`, User: `sail`, Pass: `password` |
+| **RabbitMQ AMQP Broker** | **`5676`** | `5672` / `5674` | Host broker untuk koneksi aplikasi |
+| **RabbitMQ Web Dashboard** | **`15676`** | `15672` / `15674` | URL: `http://localhost:15676` (`beti` / `rahasia123`) |
+| **Swagger UI (Dokumentasi API)**| **`8083`** | `8080` / `8082` | URL: `http://localhost:8083` |
+| **Vite Dev Server** | **`5176`** | `5173` / `5174` / `5175` | Frontend asset bundler |
+
+---
+
+## ?? 5. Panduan Menjalankan Sistem
+
+### Prasyarat
+- Docker & Docker Compose
+- WSL 2 (Ubuntu) bagi pengguna Windows
+
+### Langkah 1: Menjalankan Kontainer Docker Sail
 ```bash
 cd ~/warung_ibu_beti
 ./vendor/bin/sail up -d
 ```
 
-### 2. Menjalankan Uji Skenario Tugas 3 (Otomatis)
-Perintah ini mengeksekusi demonstrasi integrasi lengkap sesuai Lembar Kerja Tugas 3:
+### Langkah 2: Menjalankan Migrasi Database
+```bash
+./vendor/bin/sail artisan migrate
+```
+
+### Langkah 3: Menjalankan Uji Skenario Integrasi Tugas 3 (Otomatis)
+Perintah ini mendemonstrasikan seluruh alur Tugas 3 secara otomatis:
 ```bash
 ./vendor/bin/sail artisan warung:uji-tugas3
 ```
 
-**Cakupan Pengujian:**
-1. Inisialisasi katalog dan stok sembako.
-2. Transaksi Kasir POS langsung memotong stok via **Shared Database** (real-time ACID).
-3. Transaksi pembayaran QRIS & Tunai.
-4. Pemesanan Bot WhatsApp menerbitkan pesan ke **RabbitMQ (Messaging)**.
-5. Worker background (`wa:proses-pesanan`) mengeksekusi reservasi stok secara asinkron.
-6. Proteksi jika stok barang di toko tidak mencukupi (RFC 9457).
+**Hasil Uji Skenario Tugas 3:**
+- [x] Inisialisasi stok beras & minyak goreng di inventori toko.
+- [x] Transaksi kasir langsung memotong stok via **Shared Database** secara ACID.
+- [x] Transaksi kasir digital dengan metode pembayaran QRIS.
+- [x] Pesanan online pelanggan via Bot WhatsApp diterbitkan ke antrean **RabbitMQ (Messaging)**.
+- [x] Worker konsumen WhatsApp (`wa:proses-pesanan`) mereservasi stok secara asinkron.
+- [x] Proteksi galat standar RFC 9457 jika stok toko tidak mencukupi.
 
-### 3. Menjalankan Automated Test Suite (PHPUnit)
+### Langkah 4: Menjalankan Automated Test Suite (PHPUnit)
 ```bash
 ./vendor/bin/sail artisan test
 ```
-*Seluruh 12 feature & unit test lulus 100% (38 assertions).*
+*Hasil: 12 feature & unit test lulus 100% (38 assertions).*
 
-### 4. Menjalankan Worker Pesanan WhatsApp
-Untuk memproses antrean pesan WhatsApp yang masuk:
+### Langkah 5: Menjalankan Worker Pesanan WhatsApp
+Untuk memproses antrean pesan WhatsApp yang masuk secara berkala:
 ```bash
 ./vendor/bin/sail artisan wa:proses-pesanan
 ```
 
 ---
 
-## ?? 4. Dokumentasi Endpoint REST API
+## ?? 6. Dokumentasi Endpoint REST API & Contoh cURL
 
-### A. Katalog Barang Sembako
-- `GET /api/v1/barang` : Mengambil daftar sembako & sisa stok.
-- `POST /api/v1/barang` : Menambah barang baru ke inventori toko.
+Dokumentasi interaktif dapat diakses melalui **Swagger UI** di: `http://localhost:8083`.
 
-### B. Kasir POS (Shared Database)
-- `POST /api/v1/kasir/transaksi` : Transaksi kasir langsung (memotong stok langsung secara ACID).
-- `GET /api/v1/kasir/transaksi` : Riwayat transaksi kasir dan pembayaran.
+### A. Health Check
+```bash
+curl -X GET http://localhost:8090/api/v1/health
+```
 
-### C. Bot WhatsApp (Messaging via RabbitMQ)
-- `POST /api/v1/wa/pesanan` : Menerima pesanan pelanggan dari bot WA dan menerbitkan ke RabbitMQ (`202 Accepted`).
-- `GET /api/v1/wa/pesanan/{nomor}` : Memeriksa status pemrosesan pesanan WA.
+### B. Katalog Stok Sembako (Inventori)
+```bash
+# Menambah Barang Baru
+curl -X POST http://localhost:8090/api/v1/barang \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "TELUR-1KG",
+    "nama_barang": "Telur Ayam Ras 1kg",
+    "kategori": "sembako",
+    "stok": 50,
+    "harga_beli": 24000,
+    "harga_jual": 28000,
+    "satuan": "kg"
+  }'
 
-### D. Pengadaan & Supplier (Restock Logistik)
-- `GET /api/v1/suppliers` & `POST /api/v1/suppliers` : Manajemen supplier.
-- `POST /api/v1/pesanan` & `POST /api/v1/pesanan/{id}/konfirmasi` : Purchase Order tempo & validasi limit kredit.
-- `POST /api/v1/pesanan/{id}/terima-barang` : Penerimaan fisik barang kulakan (otomatis menambah stok toko).
+# Melihat Daftar Stok Barang
+curl -X GET http://localhost:8090/api/v1/barang
+```
+
+### C. Kasir POS (Gaya: Shared Database)
+```bash
+# Transaksi Belanja Langsung di Kasir (Potong Stok Real-Time)
+curl -X POST http://localhost:8090/api/v1/kasir/transaksi \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kasir_nama": "Mbak Beti",
+    "metode_bayar": "tunai",
+    "uang_diterima": 100000,
+    "items": [
+      {"sku": "TELUR-1KG", "qty": 2}
+    ]
+  }'
+```
+
+### D. Bot WhatsApp (Gaya: Messaging via RabbitMQ)
+```bash
+# Pelanggan Memesan via Chat WhatsApp
+curl -X POST http://localhost:8090/api/v1/wa/pesanan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nomor_telepon": "081298765432",
+    "nama_pelanggan": "Ibu Siti",
+    "alamat_antar": "Jl. Mawar No. 14",
+    "metode_bayar": "tunai",
+    "items": [
+      {"sku": "TELUR-1KG", "qty": 1}
+    ]
+  }'
+
+# Mengirim Pesan Tertunda ke RabbitMQ
+./vendor/bin/sail artisan pengadaan:kirim-outbox
+
+# Memproses Antrean Reservasi Stok
+./vendor/bin/sail artisan wa:proses-pesanan
+```
+
+### E. Pengadaan Supplier (Restock Barang Masuk)
+```bash
+# Mendaftarkan Supplier
+curl -X POST http://localhost:8090/api/v1/suppliers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kode_supplier": "SUP-001",
+    "nama": "PT Sumber Sembako Utama",
+    "kontak": "081234567890",
+    "limit_kredit": 20000000
+  }'
+
+# Penerimaan Barang Kulakan (Otomatis Menambah Stok Toko)
+curl -X POST http://localhost:8090/api/v1/pesanan/1/terima-barang \
+  -H "Content-Type: application/json" \
+  -d '{
+    "penerima": "Mang Udin (Gudang)",
+    "catatan": "Barang utuh",
+    "items": [
+      {"sku": "TELUR-1KG", "jumlah_diterima": 50}
+    ]
+  }'
+```
+
+---
+
+## ?? 7. Kesimpulan Integrasi
+
+Proyek ini telah membuktikan integrasi sistem komputasi awan yang modular dan andal:
+1. **Shared Database** memberikan performa maksimal dan konsistensi instan untuk transaksi kasir fisik di toko.
+2. **Messaging Pattern (RabbitMQ)** memberikan ketahanan (*resilience*) dan skalabilitas bagi kanal pemesanan online WhatsApp tanpa membebani basis data inti.
+3. **Outbox Pattern** menjamin pengiriman pesan event ke broker tidak akan hilang (*guaranteed delivery*) meskipun terjadi gangguan jaringan atau server restart.
