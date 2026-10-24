@@ -1,149 +1,282 @@
 openapi: 3.1.0
 info:
-  title: API Layanan Pengadaan & Purchase Order ? Warung Ibu Beti
+  title: API Sistem Terintegrasi Warung Ibu Beti
   version: 1.0.0
   description: |
-    Spesifikasi OpenAPI Level 2 untuk sistem Pengadaan, Pembelian (PO), Penerimaan Barang,
-    dan Hutang Dagang Supplier Warung Ibu Beti.
-    Terintegrasi secara Asinkron menggunakan Outbox Pattern dan RabbitMQ Message Broker.
+    Spesifikasi OpenAPI 3.1.0 Design-First untuk Sistem Terintegrasi Warung Ibu Beti.
+    Mencakup Layanan Kasir POS (Shared Database), Layanan Inventori Stok Sembako,
+    Layanan Bot Pemesanan WhatsApp (Messaging via RabbitMQ), dan Layanan Pengadaan Supplier.
+    Seluruh galat kesalahan terstandarisasi berbasis RFC 9457 Problem Details.
 servers:
   - url: http://localhost:8090/api/v1
     description: Server Lokal Laravel Sail (Port 8090)
 
+tags:
+  - name: Health
+    description: Pemeriksaan ketersediaan layanan dan dependensi broker & database
+  - name: Inventori Stok Sembako
+    description: Manajemen katalog produk dan sisa stok barang toko fisik
+  - name: Kasir POS (Shared Database)
+    description: Transaksi kasir langsung tatap muka dengan pemotongan stok instan
+  - name: Bot WhatsApp (Messaging)
+    description: Kanal pemesanan asinkron via chat pelanggan terhubung ke RabbitMQ
+  - name: Pengadaan Supplier
+    description: Pembelian kulakan dan restock stok sembako dari distributor
+
 paths:
   /health:
     get:
-      summary: Health Check Layanan
-      description: Memeriksa koneksi database MySQL dan koneksi broker RabbitMQ.
+      tags:
+        - Health
+      summary: Health Check Layanan & Dependensi
+      description: Memeriksa konektivitas koneksi database MySQL dan message broker RabbitMQ.
+      operationId: getHealthStatus
       responses:
         '200':
-          description: Layanan sehat dan berfungsi normal.
+          description: Seluruh subsistem (MySQL dan RabbitMQ) beroperasi normal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
         '503':
-          description: Satu atau lebih subsistem mengalami gangguan.
+          description: Satu atau lebih dependensi mengalami gangguan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
 
-  /suppliers:
+  /barang:
     get:
-      summary: Daftar Supplier
-      description: Mengambil daftar pemasok sembako dengan paginasi dan filter pencarian.
+      tags:
+        - Inventori Stok Sembako
+      summary: Katalog & Informasi Stok Sembako
+      description: Mengambil seluruh katalog produk sembako beserta sisa stok saat ini.
+      operationId: listBarang
       parameters:
         - name: q
           in: query
-          description: Kata kunci nama atau kode supplier
+          description: Pencarian nama barang atau SKU
+          schema:
+            type: string
+        - name: kategori
+          in: query
+          description: Filter kategori sembako
           schema:
             type: string
       responses:
         '200':
-          description: Berhasil mengambil daftar supplier.
+          description: Daftar stok barang berhasil diambil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
     post:
-      summary: Tambah Supplier Baru
+      tags:
+        - Inventori Stok Sembako
+      summary: Tambah Barang Baru ke Inventori Toko
+      description: Mendaftarkan master barang sembako baru ke sistem inventori.
+      operationId: createBarang
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [kode_supplier, nama, kontak]
-              properties:
-                kode_supplier:
-                  type: string
-                  example: SUP-SBK-01
-                nama:
-                  type: string
-                  example: PT Sembako Nusantara
-                kontak:
-                  type: string
-                  example: "08123456789"
-                alamat:
-                  type: string
-                  example: Jl. Pasar Induk No. 5
-                limit_kredit:
-                  type: integer
-                  example: 15000000
+              $ref: '#/components/schemas/CreateBarangRequest'
+      responses:
+        '201':
+          description: Barang berhasil didaftarkan ke sistem inventori.
+          content:
+            application/json:
+              schema:
+                type: object
+        '422':
+          description: Validasi input data barang gagal.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /barang/{sku}:
+    get:
+      tags:
+        - Inventori Stok Sembako
+      summary: Detail Stok Berdasarkan SKU
+      description: Mengambil rincian ketersediaan stok barang fisik berdasarkan kode SKU.
+      operationId: getBarangBySku
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+            example: BRS-PREM-5KG
+      responses:
+        '200':
+          description: Detail barang ditemukan.
+        '404':
+          description: Barang tidak ditemukan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /kasir/transaksi:
+    get:
+      tags:
+        - Kasir POS (Shared Database)
+      summary: Riwayat Transaksi Kasir POS
+      description: Mengambil riwayat transaksi belanja langsung yang terjadi di meja kasir warung.
+      operationId: listTransaksiKasir
+      responses:
+        '200':
+          description: Riwayat transaksi kasir toko.
+    post:
+      tags:
+        - Kasir POS (Shared Database)
+      summary: Transaksi Belanja Langsung Kasir (Gaya Shared Database)
+      description: |
+        Mencatat belanja fisik langsung di meja kasir.
+        Memotong stok secara instan di tabel barang via Shared Database dengan transaksi ACID
+        dan row-level lock (SELECT FOR UPDATE) untuk mencegah overselling.
+      operationId: createTransaksiKasir
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransaksiKasirRequest'
+      responses:
+        '201':
+          description: Transaksi berhasil dicatat dan stok langsung berkurang.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaksiKasirResponse'
+        '422':
+          description: Stok barang di toko tidak mencukupi (RFC 9457 Problem Details).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /wa/pesanan:
+    post:
+      tags:
+        - Bot WhatsApp (Messaging)
+      summary: Webhook Pesanan Online Bot WhatsApp (Gaya Messaging via RabbitMQ)
+      description: |
+        Menerima pesanan chat online WhatsApp. Menyimpan draft pesanan dan menerbitkan event
+        PesananWhatsAppMasuk ke Topic Exchange RabbitMQ secara asinkron (202 Accepted).
+      operationId: createPesananWhatsApp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PesananWaRequest'
+      responses:
+        '202':
+          description: Pesanan WhatsApp diterima dan diantrekan ke RabbitMQ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PesananWaResponse'
+        '422':
+          description: Validasi format pemesanan WhatsApp tidak valid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /wa/pesanan/{nomor}:
+    get:
+      tags:
+        - Bot WhatsApp (Messaging)
+      summary: Cek Status Pemrosesan Pesanan WhatsApp
+      description: Memeriksa progres pemrosesan dan status reservasi stok pesanan pelanggan WhatsApp.
+      operationId: getStatusPesananWa
+      parameters:
+        - name: nomor
+          in: path
+          required: true
+          schema:
+            type: string
+            example: WA-20261020-9BU1K
+      responses:
+        '200':
+          description: Status pemrosesan pesanan WA ditemukan.
+        '404':
+          description: Nomor pesanan WhatsApp tidak ditemukan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /suppliers:
+    get:
+      tags:
+        - Pengadaan Supplier
+      summary: Daftar Pemasok / Supplier
+      description: Mengambil seluruh data mitra distributor sembako dan informasi plafon kredit.
+      operationId: listSuppliers
+      responses:
+        '200':
+          description: Daftar supplier sembako.
+    post:
+      tags:
+        - Pengadaan Supplier
+      summary: Pendaftaran Supplier Baru
+      description: Mendaftarkan pemasok baru beserta plafon limit kredit tempo.
+      operationId: createSupplier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierRequest'
       responses:
         '201':
           description: Supplier berhasil didaftarkan.
-        '422':
-          description: Validasi data gagal.
-
-  /suppliers/{id}:
-    get:
-      summary: Detail Supplier
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Detail data supplier dan sisa limit kredit.
-        '404':
-          description: Supplier tidak ditemukan.
 
   /pesanan:
     get:
-      summary: Daftar Purchase Order (PO)
-      parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [draft, dikonfirmasi, diproses, selesai, dibatalkan]
+      tags:
+        - Pengadaan Supplier
+      summary: Daftar Purchase Order (PO) Kulakan
+      description: Mengambil seluruh riwayat pesanan pembelian ke distributor sembako.
+      operationId: listPurchaseOrders
       responses:
         '200':
-          description: Daftar pesanan pembelian.
+          description: Daftar purchase order pengadaan.
     post:
+      tags:
+        - Pengadaan Supplier
       summary: Buat Purchase Order (PO) Baru (Status Draft)
+      description: Membuat draf pesanan kulakan pasokan sembako baru.
+      operationId: createPurchaseOrder
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [supplier_id, metode_bayar, tanggal_pesan, items]
-              properties:
-                supplier_id:
-                  type: integer
-                  example: 1
-                metode_bayar:
-                  type: string
-                  enum: [tempo, tunai]
-                  example: tempo
-                keterangan:
-                  type: string
-                  example: Kulakan beras dan minyak
-                tanggal_pesan:
-                  type: string
-                  format: date
-                  example: "2026-10-21"
-                items:
-                  type: array
-                  items:
-                    type: object
-                    required: [sku, nama_barang, jumlah_pesan, harga_satuan]
-                    properties:
-                      sku:
-                        type: string
-                        example: BRS-5KG
-                      nama_barang:
-                        type: string
-                        example: Beras Premium 5kg
-                      jumlah_pesan:
-                        type: integer
-                        example: 50
-                      harga_satuan:
-                        type: integer
-                        example: 70000
+              $ref: '#/components/schemas/CreatePoRequest'
       responses:
         '201':
-          description: Purchase order draft berhasil dibuat.
+          description: PO draft berhasil dibuat.
 
   /pesanan/{id}/konfirmasi:
     post:
-      summary: Konfirmasi Purchase Order
-      description: |
-        Memvalidasi limit kredit supplier (jika tempo), mengunci baris database secara ACID,
-        mengubah status pesanan menjadi dikonfirmasi, dan menerbitkan event ke tabel Outbox.
+      tags:
+        - Pengadaan Supplier
+      summary: Konfirmasi Purchase Order Tempo & Validasi Plafon Kredit
+      description: Mengonfirmasi pesanan pembelian dan memastikan tidak melampaui plafon kredit supplier.
+      operationId: konfirmasiPurchaseOrder
       parameters:
         - name: id
           in: path
@@ -152,16 +285,21 @@ paths:
             type: integer
       responses:
         '200':
-          description: Pesanan berhasil dikonfirmasi.
+          description: PO berhasil dikonfirmasi dan event diterbitkan ke Outbox.
         '422':
-          description: Limit kredit supplier terlampaui (RFC 9457).
+          description: Plafon limit kredit supplier terlampaui (RFC 9457 Problem Details).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 
   /pesanan/{id}/terima-barang:
     post:
-      summary: Catat Penerimaan Barang Fisik
-      description: |
-        Mencatat kedatangan barang dari supplier, memperbarui akumulasi penerimaan,
-        menerbitkan catatan Hutang Dagang jika tempo, dan menulis event ke Outbox.
+      tags:
+        - Pengadaan Supplier
+      summary: Penerimaan Fisik Barang Supplier (Otomatis Tambah Stok Toko)
+      description: Mencatat kedatangan fisik barang di gudang warung dan otomatis mengalirkan stok ke tabel barang toko.
+      operationId: terimaBarangPo
       parameters:
         - name: id
           in: path
@@ -173,47 +311,29 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [penerima, items]
-              properties:
-                penerima:
-                  type: string
-                  example: Mang Udin
-                catatan:
-                  type: string
-                  example: Kondisi karung utuh
-                items:
-                  type: array
-                  items:
-                    type: object
-                    required: [sku, jumlah_diterima]
-                    properties:
-                      sku:
-                        type: string
-                        example: BRS-5KG
-                      jumlah_diterima:
-                        type: integer
-                        example: 50
+              $ref: '#/components/schemas/TerimaBarangRequest'
       responses:
         '201':
-          description: Penerimaan barang berhasil dicatat.
+          description: Kedatangan fisik barang dicatat dan stok toko otomatis bertambah.
 
   /hutang:
     get:
-      summary: Daftar Hutang Dagang Supplier
-      parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [belum_lunas, lunas]
+      tags:
+        - Pengadaan Supplier
+      summary: Daftar Faktur Hutang Dagang Supplier
+      description: Melihat daftar tagihan invoice hutang dagang tempo ke pemasok.
+      operationId: listHutangDagang
       responses:
         '200':
-          description: Daftar faktur hutang dagang.
+          description: Daftar faktur hutang tempo.
 
   /hutang/{id}/bayar:
     post:
-      summary: Bayar Cicilan Hutang Dagang
+      tags:
+        - Pengadaan Supplier
+      summary: Pembayaran Cicilan Faktur Hutang Dagang
+      description: Memproses pembayaran cicilan atau pelunasan hutang dagang supplier.
+      operationId: bayarHutangDagang
       parameters:
         - name: id
           in: path
@@ -233,6 +353,300 @@ paths:
                   example: 2500000
       responses:
         '200':
-          description: Pembayaran berhasil diproses dan dicatat ke outbox.
-        '400':
-          description: Nominal pembayaran tidak valid atau melebihi sisa hutang.
+          description: Pembayaran hutang berhasil dicatat.
+
+components:
+  schemas:
+    ProblemDetails:
+      type: object
+      description: Standar format pesan galat terstruktur berbasis RFC 9457
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://tools.ietf.org/html/rfc9457
+        title:
+          type: string
+          example: Stok Tidak Mencukupi
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: Stok untuk barang Beras Pandan Wangi 5kg (BRS-PREM-5KG) tidak mencukupi! Tersedia 45 pcs, diminta 999 pcs.
+        instance:
+          type: string
+          example: /api/v1/kasir/transaksi
+        kode_supplier:
+          type: string
+          example: SUP-TEST-001
+        sku:
+          type: string
+          example: BRS-PREM-5KG
+
+    HealthCheckResponse:
+      type: object
+      description: Status kesehatan komponen database dan broker
+      properties:
+        status:
+          type: string
+          example: healthy
+        layanan:
+          type: string
+          example: Warung Ibu Beti - Pengadaan & Purchase Order
+        versi:
+          type: string
+          example: 1.0.0
+        checks:
+          type: object
+          properties:
+            database:
+              type: string
+              example: OK
+            rabbitmq:
+              type: string
+              example: OK
+        timestamp:
+          type: string
+          format: date-time
+
+    CreateBarangRequest:
+      type: object
+      description: Data pendaftaran barang inventori baru
+      required: [sku, nama_barang, stok, harga_beli, harga_jual]
+      properties:
+        sku:
+          type: string
+          example: BRS-PREM-5KG
+        nama_barang:
+          type: string
+          example: Beras Pandan Wangi 5kg
+        kategori:
+          type: string
+          example: sembako
+        stok:
+          type: integer
+          example: 50
+        harga_beli:
+          type: integer
+          example: 65000
+        harga_jual:
+          type: integer
+          example: 75000
+        satuan:
+          type: string
+          example: karung
+
+    TransaksiKasirRequest:
+      type: object
+      description: Permintaan transaksi kasir belanja langsung di toko
+      required: [metode_bayar, items]
+      properties:
+        metode_bayar:
+          type: string
+          enum: [tunai, qris]
+          example: tunai
+        uang_diterima:
+          type: integer
+          example: 200000
+        kasir_nama:
+          type: string
+          example: Mbak Beti
+        catatan:
+          type: string
+          example: Belanja mingguan
+        items:
+          type: array
+          items:
+            type: object
+            required: [sku, qty]
+            properties:
+              sku:
+                type: string
+                example: BRS-PREM-5KG
+              qty:
+                type: integer
+                example: 2
+
+    TransaksiKasirResponse:
+      type: object
+      description: Informasi struk transaksi kasir dan status pelunasan
+      properties:
+        status:
+          type: string
+          example: success
+        message:
+          type: string
+          example: Transaksi kasir berhasil dicatat. Stok barang langsung berkurang secara real-time via Shared Database.
+        gaya_integrasi:
+          type: string
+          example: Shared Database (Kasir POS <-> Stok Inventori)
+        data:
+          type: object
+          properties:
+            nomor_transaksi:
+              type: string
+              example: TRX-20261020-FVLLW
+            total_belanja:
+              type: integer
+              example: 150000
+            metode_bayar:
+              type: string
+              example: tunai
+            pembayaran:
+              type: object
+              properties:
+                uang_diterima:
+                  type: integer
+                  example: 200000
+                kembalian:
+                  type: integer
+                  example: 50000
+
+    PesananWaRequest:
+      type: object
+      description: Permintaan pesanan online pelanggan dari Bot WhatsApp
+      required: [nomor_telepon, nama_pelanggan, items]
+      properties:
+        nomor_telepon:
+          type: string
+          example: "081298765432"
+        nama_pelanggan:
+          type: string
+          example: Ibu Siti
+        alamat_antar:
+          type: string
+          example: Jl. Mawar No. 14
+        metode_bayar:
+          type: string
+          enum: [tunai, qris]
+          example: tunai
+        items:
+          type: array
+          items:
+            type: object
+            required: [sku, qty]
+            properties:
+              sku:
+                type: string
+                example: BRS-PREM-5KG
+              qty:
+                type: integer
+                example: 3
+
+    PesananWaResponse:
+      type: object
+      description: Konfirmasi penerimaan pesanan di antrean asinkron
+      properties:
+        status:
+          type: string
+          example: success
+        message:
+          type: string
+          example: Pesanan WhatsApp berhasil diterima dan diterbitkan ke antrean pesan asinkron (RabbitMQ).
+        gaya_integrasi:
+          type: string
+          example: Messaging (Bot WhatsApp <-> Stok Inventori)
+        data:
+          type: object
+          properties:
+            nomor_pesanan_wa:
+              type: string
+              example: WA-20261020-9BU1K
+            status:
+              type: string
+              example: pending
+            nama_pelanggan:
+              type: string
+              example: Ibu Siti
+            total_nilai:
+              type: integer
+              example: 225000
+
+    SupplierRequest:
+      type: object
+      description: Data profil pemasok sembako baru
+      required: [kode_supplier, nama, kontak]
+      properties:
+        kode_supplier:
+          type: string
+          example: SUP-001
+        nama:
+          type: string
+          example: PT Sumber Sembako Utama
+        kontak:
+          type: string
+          example: "081234567890"
+        alamat:
+          type: string
+          example: Kawasan Industri Rancaekek
+        limit_kredit:
+          type: integer
+          example: 20000000
+
+    CreatePoRequest:
+      type: object
+      description: Rincian pesanan kulakan purchase order
+      required: [supplier_id, metode_bayar, tanggal_pesan, items]
+      properties:
+        supplier_id:
+          type: integer
+          example: 1
+        metode_bayar:
+          type: string
+          enum: [tempo, tunai]
+          example: tempo
+        keterangan:
+          type: string
+          example: Kulakan stok mingguan beras dan minyak
+        tanggal_pesan:
+          type: string
+          format: date
+          example: "2026-10-24"
+        items:
+          type: array
+          items:
+            type: object
+            required: [sku, nama_barang, jumlah_pesan, harga_satuan]
+            properties:
+              sku:
+                type: string
+                example: BRS-PREM-5KG
+              nama_barang:
+                type: string
+                example: Beras Pandan Wangi 5kg
+              jumlah_pesan:
+                type: integer
+                example: 50
+              harga_satuan:
+                type: integer
+                example: 65000
+
+    TerimaBarangRequest:
+      type: object
+      description: Bukti kedatangan fisik barang dari supplier
+      required: [penerima, items]
+      properties:
+        penerima:
+          type: string
+          example: Mang Udin (Gudang)
+        catatan:
+          type: string
+          example: Kondisi karung utuh dan rapi
+        items:
+          type: array
+          items:
+            type: object
+            required: [sku, jumlah_diterima]
+            properties:
+              sku:
+                type: string
+                example: BRS-PREM-5KG
+              jumlah_diterima:
+                type: integer
+                example: 50
