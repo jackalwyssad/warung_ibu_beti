@@ -23,11 +23,6 @@ Seluruh berkas persyaratan Checkpoint 1 telah lengkap dan siap diperiksa:
    *Event bentuk lampau (`PesananWhatsAppMasuk`, `BarangDiterimaSupplier`, `TransaksiKasirSelesai`), exchange `warung.pengadaan.events`, routing key, skema JSON, publisher, dan consumer.*
 4. **Slide Presentasi (16:9 Widescreen):** `Presentasi_Checkpoint_1_Warung_Ibu_Beti.pptx` *(diserahkan terpisah via LMS / Dosen)*  
    *Dirancang khusus untuk presentasi 4 menit sesuai rubrik penilaian (Menit 0-1 Arsitektur, Menit 1-3 Demo, Menit 3-4 Q&A).*
-5. **Pembagian Tugas Anggota Kelompok Intel:**
-   - **Jacky Firmansah (1224010) - Ketua:** Arsitektur Integrasi, Docker Sail, RabbitMQ Event Broker & Outbox Pattern.
-   - **Arya Kusuma Dinata (1224005):** Backend API Kasir, Atomic Concurrency Lock (`SELECT FOR UPDATE`) & Shared DB.
-   - **Mochamad Aldi Ardiansyah (1224020):** Desain Kontrak `openapi.yaml`, Galat Problem Details RFC 9457 & Validasi Spectral.
-   - **Andhi Yudha Permana (1224017):** Feature Test Automation (`sail artisan test`), Skenario End-to-End, Dokumentasi Repositori.
 
 ---
 
