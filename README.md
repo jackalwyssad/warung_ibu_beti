@@ -20,9 +20,7 @@
    *Event bentuk lampau (`PesananWhatsAppMasuk`, `PesananWhatsAppDikonfirmasi`, `BarangDiterimaSupplier`, `TransaksiKasirSelesai`), topic exchange `warung.pengadaan.events`, routing key, skema JSON, publisher, dan consumer.*
 3. **Microservice Bot WhatsApp Nyata (Baileys Node.js):** [`wa-bot/`](./wa-bot/)  
    *Modul bot WhatsApp multi-device (scan QR via HP) dengan alur konfirmasi persetujuan admin, mode kasir offline, dan restock instan.*
-4. **Panduan Demo Lengkap & Cheat Sheet:** [`LANGKAH_DEMO_SIAP_SALIN_ANTI_ERROR.txt`](./LANGKAH_DEMO_SIAP_SALIN_ANTI_ERROR.txt)  
-   *Contekan perintah 1-baris siap salin bebas error untuk 4 anggota kelompok.*
-5. **Dokumen Analisis Arsitektur & Slide Presentasi:** *(Diserahkan terpisah via LMS / Dosen Penguji).*
+
 
 ---
 
