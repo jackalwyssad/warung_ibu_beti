@@ -1,0 +1,16 @@
+{
+  "name": "warung-ibu-beti-wa-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Microservice Bot for Warung Ibu Beti using Baileys",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.19",
+    "axios": "^1.7.9",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

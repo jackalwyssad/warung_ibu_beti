@@ -218,6 +218,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
 
+  /wa/pesanan/{nomor}/konfirmasi:
+    post:
+      tags:
+        - Bot WhatsApp (Messaging)
+      summary: Konfirmasi Pengiriman Pesanan WhatsApp oleh Admin (Memotong Stok)
+      description: |
+        Admin toko mengonfirmasi pesanan online WhatsApp. Stok barang resmi dipotong di MySQL,
+        status pesanan berubah menjadi diproses, dan notifikasi pengiriman dikirimkan ke pelanggan.
+      operationId: konfirmasiPesananWhatsApp
+      parameters:
+        - name: nomor
+          in: path
+          required: true
+          schema:
+            type: string
+            example: WA-20261102-ZXCMZ
+      responses:
+        '200':
+          description: Pesanan WhatsApp berhasil dikonfirmasi dan stok dipotong.
+        '400':
+          description: Pesanan sudah dikonfirmasi atau dibatalkan sebelumnya.
+        '404':
+          description: Nomor pesanan WhatsApp tidak ditemukan.
+        '422':
+          description: Stok tidak mencukupi untuk memenuhi pesanan ini.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /wa/pesanan/{nomor}/tolak:
+    post:
+      tags:
+        - Bot WhatsApp (Messaging)
+      summary: Tolak / Batalkan Pesanan WhatsApp oleh Admin
+      description: Admin toko menolak pesanan WhatsApp pelanggan tanpa memotong stok.
+      operationId: tolakPesananWhatsApp
+      parameters:
+        - name: nomor
+          in: path
+          required: true
+          schema:
+            type: string
+            example: WA-20261102-ZXCMZ
+      responses:
+        '200':
+          description: Pesanan WhatsApp berhasil dibatalkan.
+        '404':
+          description: Nomor pesanan WhatsApp tidak ditemukan.
+
   /suppliers:
     get:
       tags:

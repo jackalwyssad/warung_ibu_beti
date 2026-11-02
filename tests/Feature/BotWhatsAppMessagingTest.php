@@ -46,4 +46,26 @@ class BotWhatsAppMessagingTest extends TestCase
             'status' => 'pending',
         ]);
     }
+
+    public function test_menolak_pesanan_whatsapp_jika_stok_tidak_mencukupi(): void
+    {
+        Barang::create([
+            'sku' => 'GULA-1KG',
+            'nama_barang' => 'Gula Pasir 1kg',
+            'stok' => 2,
+            'harga_jual' => 17000,
+        ]);
+
+        $response = $this->postJson('/api/v1/wa/pesanan', [
+            'nomor_telepon' => '0812345678',
+            'nama_pelanggan' => 'Pak Budi',
+            'metode_bayar' => 'tunai',
+            'items' => [
+                ['sku' => 'GULA-1KG', 'qty' => 5], // minta 5 padahal stok cuma 2
+            ],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('title', 'Stok Tidak Mencukupi');
+    }
 }

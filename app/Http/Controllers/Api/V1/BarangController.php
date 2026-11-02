@@ -59,4 +59,20 @@ class BarangController extends Controller
             'data' => $barang,
         ]);
     }
+
+    public function restock(Request $request, string $sku): JsonResponse
+    {
+        $data = $request->validate([
+            'jumlah' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $barang = Barang::where('sku', $sku)->firstOrFail();
+        $barang->increment('stok', (int) $data['jumlah']);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Stok {$barang->nama_barang} ({$sku}) berhasil ditambah +{$data['jumlah']} unit.",
+            'data' => $barang->fresh(),
+        ]);
+    }
 }

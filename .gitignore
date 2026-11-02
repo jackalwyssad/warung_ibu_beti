@@ -27,3 +27,10 @@ Thumbs.db
 _ide_helper.php
 *.pdf
 *.pptx
+
+*.py
+__pycache__/
+test_po.sh
+wa-bot/node_modules/
+wa-bot/auth_info_baileys/
+wa-bot/*.log

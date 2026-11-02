@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Exceptions\StokTidakMencukupiException;
 use App\Messaging\PenerbitPesanan;
 use App\Models\Barang;
 use App\Models\ItemPesananWa;
@@ -28,7 +29,18 @@ class TerbitkanPesananWaAction
             $itemsPayload = [];
 
             foreach ($data['items'] as $itemInput) {
-                $barang = Barang::where('sku', $itemInput['sku'])->firstOrFail();
+                // Mengunci row barang (Pessimistic Locking) untuk mencegah race-condition & overselling
+                $barang = Barang::where('sku', $itemInput['sku'])->lockForUpdate()->firstOrFail();
+
+                if ($barang->stok < $itemInput['qty']) {
+                    throw new StokTidakMencukupiException(
+                        $barang->sku,
+                        $barang->nama_barang,
+                        $barang->stok,
+                        (int) $itemInput['qty']
+                    );
+                }
+
                 $subtotal = $itemInput['qty'] * $barang->harga_jual;
                 $totalNilai += $subtotal;
 

@@ -22,6 +22,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/barang', [BarangController::class, 'index']);
     Route::post('/barang', [BarangController::class, 'store']);
     Route::get('/barang/{sku}', [BarangController::class, 'show']);
+    Route::patch('/barang/{sku}/restock', [BarangController::class, 'restock']);
 
     // 2. Sistem Kasir (POS) - Gaya Integrasi: Shared Database (Real-time ACID)
     Route::get('/kasir/transaksi', [KasirController::class, 'index']);
@@ -30,6 +31,8 @@ Route::prefix('v1')->group(function () {
     // 3. Bot Pemesanan WhatsApp - Gaya Integrasi: Messaging (RabbitMQ Asinkron)
     Route::post('/wa/pesanan', [BotWhatsAppController::class, 'store']);
     Route::get('/wa/pesanan/{nomor}', [BotWhatsAppController::class, 'show']);
+    Route::post('/wa/pesanan/{nomor}/konfirmasi', [BotWhatsAppController::class, 'konfirmasi']);
+    Route::post('/wa/pesanan/{nomor}/tolak', [BotWhatsAppController::class, 'tolak']);
 
     // ==========================================
     // SISTEM PENGADAAN & SUPPLIER (KULAKAN RESTOCK)

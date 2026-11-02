@@ -1,0 +1,149 @@
+================================================================================
+  PANDUAN LIVE DEMO TERPADU WARUNG IBU BETI (CHECKPOINT 1 - 25IF1504)
+  KELOMPOK INTEL - STMIK BANDUNG (KURIKULUM 2025)
+  FORMAT PLAIN TEXT ANTI-ERROR (SETIAP PERINTAH 1 BARIS UTUH TINGGAL COPAS)
+================================================================================
+
+TIPS PENTING:
+- Buka file ini di Notepad saat demo berlangsung.
+- Setiap perintah cURL atau artisan di bawah ini ditulis dalam 1 baris utuh.
+- Cukup blok 1 baris penuh, tekan Ctrl+C, lalu paste (klik kanan / Ctrl+Shift+V) di terminal WSL.
+- Dijamin tidak akan ada error "option -d: requires parameter" atau "validation.required"!
+
+--------------------------------------------------------------------------------
+LINK & DASHBOARD BROWSER YANG HARUS DIBUKA SEBELUM DEMO:
+--------------------------------------------------------------------------------
+1. Swagger UI (Dokumentasi API OpenAPI 3.1) : http://localhost:8083
+2. RabbitMQ Management Dashboard            : http://localhost:15676 (User: beti | Pass: rahasia123)
+3. Health Check Endpoint                    : http://localhost:8090/api/v1/health
+
+================================================================================
+SENJATA UTAMA: DEMO LENGKAP OTOMATIS (1 COMMAND)
+================================================================================
+Jika dosen meminta demonstrasi cepat otomatis yang langsung menguji 7 tahapan integrasi:
+
+./vendor/bin/sail artisan warung:uji-tugas3
+
+Jika dosen meminta pengujian seluruh unit & feature tests (100% Pass):
+
+./vendor/bin/sail artisan test
+
+
+================================================================================
+BAGIAN 1: ARYA KUSUMA DINATA (1224005) - SETUP, HEALTH CHECK & INVENTORI
+WAKTU: MENIT 00:00 - 01:00
+================================================================================
+
+[Langkah 1.1] Pastikan 4 Kontainer Docker Sail Berjalan Sehat:
+cd ~/warung_ibu_beti && ./vendor/bin/sail ps
+
+[Langkah 1.2] Reset & Isi Master Database Sembako (Fresh & Seed):
+./vendor/bin/sail artisan migrate:fresh --seed
+
+[Langkah 1.3] Uji Health Check Backend API:
+curl -i http://localhost:8090/api/v1/health
+
+[Langkah 1.4] Tampilkan Katalog Master Sembako Awal:
+curl -s http://localhost:8090/api/v1/barang
+
+--- Skrip Narasi Arya ---
+"Selamat pagi/siang Bapak/Ibu Dewan Penguji. Kami dari kelompok Intel mendemonstrasikan sistem terintegrasi Warung Ibu Beti. Di terminal, saya membuktikan 4 kontainer Docker Sail berjalan sehat: Laravel API (port 8090), MySQL (port 3309), RabbitMQ (port 5676), dan Swagger UI (port 8083). Database telah di-reset ke kondisi fresh dan endpoint health check merespons 200 OK healthy. Selanjutnya, rekan saya Mochamad Aldi akan mendemonstrasikan kontrak OpenAPI 3.1 dan logistik pengadaan supplier."
+
+
+================================================================================
+BAGIAN 2: MOCHAMAD ALDI ARDIANSYAH (1224020) - SWAGGER UI & PENGADAAN RESTOCK
+WAKTU: MENIT 01:00 - 02:00
+================================================================================
+TIPS UNTUK ALDI: Lebih disarankan mendemokan langsung via browser Swagger UI di http://localhost:8083!
+Namun jika ingin mendemokan lewat terminal cURL, gunakan perintah 1 baris berikut:
+
+[Langkah 2.0] Buktikan Audit Linter OpenAPI Lolos 0 Error & 0 Warning (Stoplight Spectral):
+./vendor/bin/sail npx @stoplight/spectral-cli lint openapi.yaml --fail-severity=warn
+(Hasil terminal akan memunculkan: "No results with a severity of 'warn' or higher found!" dengan Exit Code 0)
+
+[Langkah 2.1] Mendaftarkan Supplier Baru & Plafon Limit Kredit:
+curl -X POST http://localhost:8090/api/v1/suppliers -H "Content-Type: application/json" -d '{"kode_supplier":"SUP-001","nama":"PT Sumber Sembako Utama","kontak":"081234567890","limit_kredit":20000000}'
+
+[Langkah 2.2] Membuat Draft Purchase Order (PO) Kulakan Sembako:
+curl -X POST http://localhost:8090/api/v1/pesanan -H "Content-Type: application/json" -d '{"supplier_id":1,"metode_bayar":"tempo","tanggal_pesan":"2026-11-01","items":[{"sku":"BRS-PREM-5KG","nama_barang":"Beras Pandan Wangi 5kg","jumlah_pesan":50,"harga_satuan":65000}]}'
+
+[Langkah 2.3] Konfirmasi PO & Validasi Batas Kredit Supplier:
+curl -X POST http://localhost:8090/api/v1/pesanan/1/konfirmasi
+
+[Langkah 2.4] Catat Penerimaan Fisik Barang di Toko (Stok Otomatis Nambah & Terbit Faktur Utang):
+curl -X POST http://localhost:8090/api/v1/pesanan/1/terima-barang -H "Content-Type: application/json" -d '{"penerima":"Mang Udin (Gudang)","catatan":"Barang utuh tidak cacat","items":[{"sku":"BRS-PREM-5KG","jumlah_diterima":50}]}'
+
+--- Skrip Narasi Aldi ---
+"Terima kasih Arya. Bapak/Ibu Dosen, seluruh kontrak API kami susun dengan prinsip Design-First OpenAPI 3.1 dan lolos audit Stoplight Spectral dengan 0 error. Di browser Swagger UI port 8083 atau terminal, saya baru saja mendaftarkan distributor sembako dengan limit kredit Rp20.000.000, membuat dan mengonfirmasi PO, serta mencatat penerimaan barang fisik di toko. Stok beras otomatis bertambah dan faktur utang dagang tempo 30 hari langsung diterbitkan ke buku keuangan tanpa resiko nota terselip. Sekarang rekan saya Andhi akan mendemonstrasikan penjualan kasir fisik via Shared Database."
+
+
+================================================================================
+BAGIAN 3: ANDHI YUDHA PERMANA (1224017) - KASIR POS (SHARED DB & RFC 9457)
+WAKTU: MENIT 02:00 - 03:00
+================================================================================
+
+[Langkah 3.1] Cek Stok Sembako Sebelum Transaksi (1 Baris Langsung dari Bash):
+docker exec warung_ibu_beti-mysql-1 mysql -u sail -ppassword warung_beti -e "SELECT sku, nama_barang, stok, harga_jual FROM barang;"
+
+[Langkah 3.2] Transaksi Kasir POS Tunai (Beli 2 Beras + 1 Minyak, Uang Rp200.000):
+curl -X POST http://localhost:8090/api/v1/kasir/transaksi -H "Content-Type: application/json" -d '{"kasir_nama":"Mbak Beti","metode_bayar":"tunai","uang_diterima":200000,"items":[{"sku":"BRS-PREM-5KG","qty":2},{"sku":"MYK-GRG-2L","qty":1}]}'
+
+[Langkah 3.3] Buktikan Stok Beras Terpotong Instan di MySQL (Row-Lock ACID):
+docker exec warung_ibu_beti-mysql-1 mysql -u sail -ppassword warung_beti -e "SELECT sku, nama_barang, stok FROM barang WHERE sku='BRS-PREM-5KG';"
+
+[Langkah 3.4] Transaksi Kasir POS Digital QRIS (Beli 2 Minyak Goreng):
+curl -X POST http://localhost:8090/api/v1/kasir/transaksi -H "Content-Type: application/json" -d '{"kasir_nama":"Mbak Beti","metode_bayar":"qris","items":[{"sku":"MYK-GRG-2L","qty":2}]}'
+
+[Langkah 3.5] Pembuktian Proteksi Stok Habis (Beli 999 Beras -> Error RFC 9457 HTTP 422):
+curl -X POST http://localhost:8090/api/v1/kasir/transaksi -H "Content-Type: application/json" -d '{"kasir_nama":"Mbak Beti","metode_bayar":"tunai","uang_diterima":100000000,"items":[{"sku":"BRS-PREM-5KG","qty":999}]}'
+
+--- Skrip Narasi Andhi ---
+"Terima kasih Aldi. Bapak/Ibu Dosen, saya mendemonstrasikan modul Kasir POS toko fisik yang mengadopsi Shared Database dengan Pessimistic Row Locking SELECT FOR UPDATE. Ketika Mbak Beti memproses pembelian tunai Rp200.000, struk 201 Created keluar seketika dengan kembalian Rp12.000, dan stok beras langsung terpotong detik itu juga di MySQL. Saat dicoba transaksi 999 karung beras melebihi stok, sistem secara otomatis melakukan rollback transaksi dan merespons dengan galat standar RFC 9457 Problem Details HTTP 422 Stok Tidak Mencukupi. Selanjutnya, ketua kelompok kami, Jacky Firmansah, akan mendemonstrasikan jalur asinkron Bot WhatsApp, RabbitMQ, dan pengujian otomatis."
+
+
+================================================================================
+BAGIAN 4: JACKY FIRMANSAH (1224010) - BOT WHATSAPP, RABBITMQ & TESTS
+WAKTU: MENIT 03:00 - 04:00
+================================================================================
+
+[Langkah 4.1] Kirim Pesanan Daring WhatsApp (Ibu Siti Beli 3 Beras -> Respons 202 Accepted):
+curl -X POST http://localhost:8090/api/v1/wa/pesanan -H "Content-Type: application/json" -d '{"nomor_telepon":"081298765432","nama_pelanggan":"Ibu Siti (Katering)","alamat_antar":"Jl. Mawar No. 14","metode_bayar":"tunai","items":[{"sku":"BRS-PREM-5KG","qty":3}]}'
+
+[Langkah 4.2] Tunjukkan Event Tersimpan Aman di Tabel Outbox MySQL (Status: pending):
+docker exec warung_ibu_beti-mysql-1 mysql -u sail -ppassword warung_beti -e "SELECT id, event_nama, status, created_at FROM outbox_kirim ORDER BY id DESC LIMIT 1;"
+
+[Langkah 4.3] Jalankan Daemon Pengirim Outbox ke RabbitMQ:
+./vendor/bin/sail artisan pengadaan:kirim-outbox
+
+[Langkah 4.4] AKSI DI BROWSER RABBITMQ (http://localhost:15676):
+- Buka tab 'Queues' -> Tunjukkan antrean 'wa.pesanan-antrean' kolom 'Ready = 1'.
+- Klik antrean -> Scroll ke bawah ke 'Get messages' -> Klik tombol 'Get Message(s)'.
+- Tunjukkan isi payload JSON pesanan Ibu Siti ke dosen!
+
+[Langkah 4.5] Jalankan Worker Konsumen WhatsApp (Stok Dipotong & Kirim basic_ack):
+./vendor/bin/sail artisan wa:proses-pesanan --timeout=3
+*Refresh browser RabbitMQ: Kolom Ready kembali menjadi 0 (selesai diproses bersih)*
+
+[Langkah 4.6] Jalankan Automated Test Suite PHPUnit (12 Tests, 38 Assertions 100% PASS):
+./vendor/bin/sail artisan test
+
+--- Skrip Narasi Jacky ---
+"Terima kasih Andhi. Bapak/Ibu Dosen Penguji, saya mendemonstrasikan tulang punggung integrasi asinkron sistem kami. Pemesanan WhatsApp merespons instan dalam 15 milidetik dengan status HTTP 202 Accepted. Melalui Transactional Outbox Pattern, pesanan dan event ditulis atomik di MySQL dengan status pending sehingga bebas dari Dual-Write Hazard. Saat daemon outbox dijalankan, event diterbitkan ke Topic Exchange warung.pengadaan.events dan terlihat di dashboard RabbitMQ port 15676 antrean Ready bertambah jadi 1. Ketika worker wa:proses-pesanan dieksekusi, stok terpotong, status berubah jadi diproses, dan pesan ter-ack bersih. Terakhir, seluruh 12 test case PHPUnit lulus 100% PASS membuktikan arsitektur kami kokoh. Kami membuka sesi tanya jawab teknis. Terima kasih."
+
+
+================================================================================
+CHEATSHEET DARURAT KETIKA PRESENTASI (EMERGENCY FIX)
+================================================================================
+1. Jika port 8090 atau 15676 konflik / tabrakan:
+docker stop $(docker ps -aq) && ./vendor/bin/sail up -d
+
+2. Jika koneksi RabbitMQ connection refused saat awal:
+./vendor/bin/sail exec rabbitmq rabbitmq-diagnostics ping
+
+3. Jika data stok sembako berantakan karena bekas testing sebelumnya:
+./vendor/bin/sail artisan migrate:fresh
+
+================================================================================
+SELESAI - SIAP DEMO TANPA ERROR!
+================================================================================
+
