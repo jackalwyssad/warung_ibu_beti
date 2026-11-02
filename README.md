@@ -160,22 +160,45 @@ Pastikan seluruh 4 kontainer berjalan sehat:
 ```
 *Hasil: `No results with a severity of 'warn' or higher found!` (0 errors, 0 warnings).*
 
----
+### Langkah 6: Menjalankan Microservice Bot WhatsApp Nyata (Baileys)
 
-## 5. Menjalankan Bot WhatsApp Nyata (Microservice Baileys)
+Jika baru pertama kali melakukan *clone* proyek, pasang dependensi bot terlebih dahulu:
+```bash
+cd ~/warung_ibu_beti && ./vendor/bin/sail exec laravel.test bash -c "cd /var/www/html/wa-bot && npm install --allow-git=all"
+```
 
-Modul ini menghubungkan nomor WhatsApp pribadi atau WhatsApp grup menjadi kasir dan bot toko Warung Ibu Beti:
-
+Kemudian jalankan bot WhatsApp dengan perintah berikut:
 ```bash
 cd ~/warung_ibu_beti && ./vendor/bin/sail exec laravel.test node /var/www/html/wa-bot/index.js
 ```
+*(Atau jika laptop/host Anda sudah terpasang Node.js: `cd wa-bot && npm start`)*
 
-1. **Scan Kode QR:** Buka WhatsApp di HP Anda $\rightarrow$ Titik Tiga / Pengaturan $\rightarrow$ *Perangkat Tertaut (Linked Devices)* $\rightarrow$ *Tautkan Perangkat* $\rightarrow$ Scan QR di terminal.
-2. **Katalog & Stok:** Ketik `menu` untuk katalog, atau `stok` untuk cek sisa stok toko secara *real-time*.
-3. **Pemesanan Pembeli:** Ketik `PESAN#Nama#Alamat#Kode SKU#Jumlah` (Contoh: `PESAN#Ibu Siti#Jl. Mawar 14#BRS-PREM-5KG#2`).
-   * *Stok online BELUM terpotong sampai admin menyetujui.*
-   * Pembeli menerima konfirmasi antrean pesanan.
-4. **Persetujuan Admin Super Cepat:** Bot mengirim notifikasi ke chat pribadi Admin. Admin cukup membalas:
+---
+
+## 5. Panduan Penggunaan Bot WhatsApp (Scan QR & Perintah Chat)
+
+Modul `wa-bot/` menggunakan library **Baileys (WebSockets Multi-Device)** untuk menghubungkan nomor WhatsApp pribadi atau WhatsApp grup menjadi kasir dan asisten toko otomatis Warung Ibu Beti:
+
+### A. Cara Menghubungkan (Scan QR):
+1. Jalankan perintah bot di Langkah 6 di atas. Di layar terminal akan muncul **gambar Kode QR**.
+2. Buka aplikasi **WhatsApp di HP pribadi Anda**.
+3. Masuk ke menu:
+   * **Android:** Titik tiga di kanan atas $\rightarrow$ **Perangkat Tertaut** (*Linked Devices*).
+   * **iPhone:** Menu **Pengaturan** (*Settings*) $\rightarrow$ **Perangkat Tertaut**.
+4. Ketuk **Tautkan Perangkat** (*Link a Device*) $\rightarrow$ Arahkan kamera HP ke Kode QR di terminal.
+5. Selesai! Bot langsung aktif dan sesi login tersimpan otomatis di folder `auth_info_baileys/`.
+
+### B. Tabel Perintah Chat WhatsApp:
+
+| Perintah | Siapa yang Menjalankan | Fungsi & Dampak |
+| :--- | :--- | :--- |
+| `menu` atau `halo` | Siapa saja (Pribadi / Grup) | Menampilkan katalog sembako dan format pemesanan |
+| `stok` | Siapa saja (Pribadi / Grup) | Mengecek sisa stok beras dan minyak secara *real-time* dari MySQL |
+| `PESAN#Nama#Alamat#SKU#Qty`<br/>*Contoh:* `PESAN#Ibu Siti#Jl. Mawar 14#BRS-PREM-5KG#2` | Pelanggan / Anggota Grup | Membuat pesanan baru (*Status: Pending*). **Stok BELUM berkurang** sampai admin menyetujui. |
+| `YA` atau `ACC` atau `KIRIM` | **Khusus Admin Toko** | **Menyetujui pesanan online & memotong stok di database!** Bot otomatis mengirim chat konfirmasi pengiriman ke WhatsApp pembeli. |
+| `TOLAK` atau `BATAL` | **Khusus Admin Toko** | Membatalkan pesanan online (stok tetap utuh). |
+| `OFFLINE#SKU#Qty`<br/>*Contoh:* `OFFLINE#BRS-PREM-5KG#1` | **Khusus Admin Toko** | Mencatat penjualan langsung di toko fisik via **Kasir POS (Shared Database)**. Stok langsung berkurang instan. |
+| `RESTOCK#SKU#Qty`<br/>*Contoh:* `RESTOCK#BRS-PREM-5KG#50` | **Khusus Admin Toko** | Menambah stok sembako toko/gudang secara instan. |
    * **`YA`** atau **`ACC`** $\rightarrow$ Menyetujui pesanan, memotong stok di MySQL, dan bot otomatis mengirim pesan konfirmasi pengiriman ke WhatsApp pembeli!
    * **`TOLAK`** $\rightarrow$ Membatalkan pesanan.
 5. **Transaksi Kasir Offline (Khusus Admin):** Ketik `OFFLINE#BRS-PREM-5KG#1` di chat pribadi admin untuk mencatat penjualan langsung di toko fisik (stok langsung terpotong via Kasir POS).
